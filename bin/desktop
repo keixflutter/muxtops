@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+state=${XDG_STATE_HOME:-$HOME/.local/state}/muxtops
+config=${XDG_CONFIG_HOME:-$HOME/.config}/muxtops
+# Fixed display keeps SSH forwarding predictable. Fail instead of killing
+# another application's X server if display :1 is already occupied.
+display=:1
+port=5901
+mkdir -p "$state" "$config"
+
+alive() {
+    [[ -f $state/session.pid ]] && kill -0 "$(cat "$state/session.pid")" 2>/dev/null
+}
+
+session() {
+    local xpid='' wpid='' ready=0
+    cleanup() {
+        [[ -z $wpid ]] || kill "$wpid" 2>/dev/null || true
+        [[ -z $xpid ]] || kill "$xpid" 2>/dev/null || true
+        rm -f "$state/session.pid"
+    }
+    trap cleanup EXIT
+    trap 'exit 0' TERM INT HUP
+    export DISPLAY=$display
+    Xvnc "$display" -localhost -rfbport "$port" \
+        -rfbauth "$config/passwd" -geometry 1280x720 -depth 24 &
+    xpid=$!
+    # Wait for the X server to accept connections before starting the desktop.
+    for ((attempt=0; attempt<50; attempt++)); do
+        kill -0 "$xpid" 2>/dev/null || { echo 'Xvnc failed; see desktop log.'; exit 1; }
+        if "$PREFIX/bin/xrdb" -display "$display" -query >/dev/null 2>&1; then
+            ready=1
+            break
+        fi
+        sleep 0.1
+    done
+    [[ $ready == 1 ]] || { echo "X server readiness timed out."; exit 1; }
+    kill -0 "$xpid" 2>/dev/null || exit 1
+    dbus-run-session -- bash -c '
+        feh --bg-fill "$HOME/.config/muxtops/wallpaper" 2>/dev/null || true
+        xterm -geometry 90x24+30+30 &
+        exec openbox --config-file "$1"
+    ' bash "$config/rc.xml" &
+    wpid=$!
+    wait -n "$xpid" "$wpid"
+}
+
+case ${1:-help} in
+    start)
+        alive && { echo 'Desktop already running on localhost:5901.'; exit 0; }
+        [[ -s $config/passwd ]] || { echo 'Run desktop password first.' >&2; exit 1; }
+        for dep in Xvnc dbus-run-session openbox xterm xrdb; do
+            command -v "$dep" >/dev/null || { echo "Missing dependency: $dep" >&2; exit 1; }
+        done
+        if [[ -e ${TMPDIR:-$PREFIX/tmp}/.X11-unix/X1 || -e ${TMPDIR:-$PREFIX/tmp}/.X1-lock ]]; then
+            echo 'Display :1 is occupied. Check the existing server before starting.' >&2
+            exit 1
+        fi
+        cat > "$config/rc.xml" <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <theme><name>Clearlooks</name></theme>
+  <keyboard>
+    <keybind key="W-Return"><action name="Execute"><command>xterm</command></action></keybind>
+    <keybind key="A-F4"><action name="Close"/></keybind>
+    <keybind key="A-Tab"><action name="NextWindow"/></keybind>
+  </keyboard>
+  <mouse><context name="Titlebar">
+    <mousebind button="Left" action="Drag"><action name="Move"/></mousebind>
+    <mousebind button="Right" action="Drag"><action name="Resize"/></mousebind>
+    <mousebind button="Left" action="DoubleClick"><action name="ToggleMaximize"/></mousebind>
+  </context></mouse>
+</openbox_config>
+XML
+        nohup "$0" _session </dev/null >"$state/desktop.log" 2>&1 &
+        echo $! > "$state/session.pid"
+        sleep 1
+        if alive; then
+            echo 'Desktop running: localhost:5901 (SSH tunnel required).'
+        else
+            cat "$state/desktop.log" >&2
+            exit 1
+        fi
+        ;;
+    stop)
+        if alive; then
+            kill "$(cat "$state/session.pid")"
+            echo 'Desktop stopping.'
+        else
+            echo 'Desktop is stopped.'
+        fi
+        ;;
+    status)
+        if alive; then echo 'Running: localhost:5901'; else echo 'Stopped'; fi
+        ;;
+    log) tail -n 80 "$state/desktop.log" ;;
+    password)
+        vncpasswd "$config/passwd"
+        chmod 600 "$config/passwd"
+        ;;
+    _session) session ;;
+    *) printf '%s\n' 'Usage: desktop {start|stop|status|log|password}' ;;
+esac
