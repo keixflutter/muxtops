@@ -8,7 +8,7 @@ fi
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # Install only the desktop essentials. Do not upgrade unrelated packages.
 pkg install -y x11-repo
-pkg install -y tigervnc openbox xterm dbus feh xorg-xrdb
+apt-get install -y --no-install-recommends tigervnc openbox aterm dbus libexpat feh xorg-xrdb
 install -Dm755 "$repo_dir/bin/desktop" "$PREFIX/bin/desktop"
 mkdir -p "$HOME/.config/muxtops" "$HOME/.local/state/muxtops"
 if [[ ! -s $HOME/.config/muxtops/passwd ]]; then

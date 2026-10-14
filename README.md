@@ -4,12 +4,15 @@ A small, native Termux desktop: Openbox, xterm and TigerVNC. No proot,
 full Linux distribution, shell replacement, compositor or background desktop
 at login. SSH and Tailscale remain independent.
 
-Status: initial prototype. Shell checks pass; installation and graphical
-startup on Android have not yet been verified.
+Status: installed and tested on Redmi Note 11 Pro, Android 13 (aarch64).
+Start/stop/restart, duplicate-start protection, X window creation and the VNC
+protocol over an SSH tunnel pass. A visual VNC client check is still pending.
 
 ## Install on Android
 
 Requires the GitHub/F-Droid version of Termux, Bash and an internet connection.
+For a private repository, use an authenticated clone or copy the checkout to
+the phone over SSH.
 
 ```sh
 pkg install git
@@ -48,7 +51,10 @@ macOS Screen Sharing:
 open vnc://127.0.0.1:15901
 ```
 
-Use the VNC password created during installation. The VNC server listens on
+Use the VNC password created during installation. On the initial Redmi test
+installation, a random password was saved in
+`~/.config/muxtops/vnc-password.txt` with owner-only permissions. Retrieve it
+with `ssh redmi cat .config/muxtops/vnc-password.txt`. The VNC server listens on
 loopback only; SSH carries the connection to the Mac.
 
 ## Controls and customization
@@ -66,8 +72,9 @@ it. Logs and session PID live in `~/.local/state/muxtops`.
 ## Limits
 
 Android may stop Termux in the background. There is no boot service or
-battery-policy modification. Display `:1` must be free. Performance and RAM
-usage have not been measured. A panel and file manager are planned as optional
+battery-policy modification. Display `:1` must be free. A preliminary idle measurement was about 51 MiB summed RSS for Xvnc, Openbox,
+aterm and the session D-Bus daemon (shared pages may be counted more than once).
+This is not a benchmark. A panel and file manager are planned as optional
 additions after verifying the minimal desktop.
 
 ## Remove launcher

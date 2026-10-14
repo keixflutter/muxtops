@@ -14,16 +14,17 @@ alive() {
 }
 
 session() {
-    local xpid='' wpid='' ready=0
+    local xpid='' wpid='' bpid='' ready=0
     cleanup() {
         [[ -z $wpid ]] || kill "$wpid" 2>/dev/null || true
+        [[ -z $bpid ]] || kill "$bpid" 2>/dev/null || true
         [[ -z $xpid ]] || kill "$xpid" 2>/dev/null || true
-        rm -f "$state/session.pid"
+        rm -f "$state/session.pid" "$state/ready"
     }
     trap cleanup EXIT
     trap 'exit 0' TERM INT HUP
     export DISPLAY=$display
-    Xvnc "$display" -localhost -rfbport "$port" \
+    Xvnc "$display" -nolisten tcp -localhost -rfbport "$port" \
         -rfbauth "$config/passwd" -geometry 1280x720 -depth 24 &
     xpid=$!
     # Wait for the X server to accept connections before starting the desktop.
@@ -37,20 +38,34 @@ session() {
     done
     [[ $ready == 1 ]] || { echo "X server readiness timed out."; exit 1; }
     kill -0 "$xpid" 2>/dev/null || exit 1
-    dbus-run-session -- bash -c '
+    : > "$state/dbus-address"
+    dbus-daemon --session --nofork --print-address=3 3>"$state/dbus-address" &
+    bpid=$!
+    for ((attempt=0; attempt<50; attempt++)); do
+        [[ -s $state/dbus-address ]] && break
+        kill -0 "$bpid" 2>/dev/null || exit 1
+        sleep 0.1
+    done
+    [[ -s $state/dbus-address ]] || exit 1
+    export DBUS_SESSION_BUS_ADDRESS
+    DBUS_SESSION_BUS_ADDRESS=$(head -n 1 "$state/dbus-address")
+    bash -c '
         feh --bg-fill "$HOME/.config/muxtops/wallpaper" 2>/dev/null || true
         xterm -geometry 90x24+30+30 &
         exec openbox --config-file "$1"
     ' bash "$config/rc.xml" &
     wpid=$!
-    wait -n "$xpid" "$wpid"
+    sleep 0.5
+    kill -0 "$xpid" 2>/dev/null && kill -0 "$wpid" 2>/dev/null || exit 1
+    touch "$state/ready"
+    wait -n "$xpid" "$wpid" "$bpid"
 }
 
 case ${1:-help} in
     start)
         alive && { echo 'Desktop already running on localhost:5901.'; exit 0; }
         [[ -s $config/passwd ]] || { echo 'Run desktop password first.' >&2; exit 1; }
-        for dep in Xvnc dbus-run-session openbox xterm xrdb; do
+        for dep in Xvnc dbus-daemon openbox xterm xrdb; do
             command -v "$dep" >/dev/null || { echo "Missing dependency: $dep" >&2; exit 1; }
         done
         if [[ -e ${TMPDIR:-$PREFIX/tmp}/.X11-unix/X1 || -e ${TMPDIR:-$PREFIX/tmp}/.X1-lock ]]; then
@@ -73,10 +88,15 @@ case ${1:-help} in
   </context></mouse>
 </openbox_config>
 XML
+        rm -f "$state/ready"
         nohup "$0" _session </dev/null >"$state/desktop.log" 2>&1 &
         echo $! > "$state/session.pid"
-        sleep 1
-        if alive; then
+        for ((attempt=0; attempt<80; attempt++)); do
+            alive || break
+            [[ -f $state/ready ]] && break
+            sleep 0.1
+        done
+        if alive && [[ -f $state/ready ]]; then
             echo 'Desktop running: localhost:5901 (SSH tunnel required).'
         else
             cat "$state/desktop.log" >&2
@@ -86,7 +106,12 @@ XML
     stop)
         if alive; then
             kill "$(cat "$state/session.pid")"
-            echo 'Desktop stopping.'
+            for ((attempt=0; attempt<50; attempt++)); do
+                alive || break
+                sleep 0.1
+            done
+            if alive; then echo "Desktop did not stop; inspect desktop log." >&2; exit 1; fi
+            echo 'Desktop stopped.'
         else
             echo 'Desktop is stopped.'
         fi
