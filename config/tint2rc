@@ -46,7 +46,6 @@ mouse_scroll_up = toggle
 mouse_scroll_down = iconify
 time1_format = %H:%M
 time1_font = DejaVu Sans 11
-time1_timezone = Asia/Jakarta
 clock_font_color = #d4e2e7 100
 clock_padding = 14 0
 clock_background_id = 0

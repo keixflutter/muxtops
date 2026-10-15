@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run on the Redmi test installation. Restarts its muxtops desktop.
+# Run on an isolated Termux test setup. Restarts its muxtops desktop.
 set -euo pipefail
 state=${XDG_STATE_HOME:-$HOME/.local/state}/muxtops
 

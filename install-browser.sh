@@ -5,7 +5,21 @@ set -euo pipefail
 config=${XDG_CONFIG_HOME:-$HOME/.config}/muxtops
 [[ -f $config/tint2rc && -f $config/menu.xml ]] || { echo 'Run install.sh first.' >&2; exit 1; }
 # Older Termux C++ runtimes cannot load the current Firefox/FFmpeg builds.
-apt-get install -y --no-install-recommends libc++ firefox
+case ${1:-} in
+    --configure-only) ;;
+    '')
+        new_app=0
+        dpkg-query -W -f='${Status}' firefox 2>/dev/null | grep -q 'install ok installed' || new_app=1
+        apt-get install -y --no-install-recommends libc++ firefox
+        if [[ $new_app == 1 ]]; then
+            state=${XDG_STATE_HOME:-$HOME/.local/state}/muxtops
+            mkdir -p "$state"
+            printf '%s\n' firefox >> "$state/installed-packages"
+            sort -u "$state/installed-packages" -o "$state/installed-packages"
+        fi
+        ;;
+    *) echo "Usage: bash install-browser.sh [--configure-only]" >&2; exit 2 ;;
+esac
 firefox --version
 mkdir -p "$config/launchers"
 cat > "$config/launchers/browser.desktop" <<DESKTOP

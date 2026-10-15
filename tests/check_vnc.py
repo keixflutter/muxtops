@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Check the real SSH tunnel, VNC authentication and desktop dimensions.
+"""Authenticate to a real VNC server and verify desktop dimensions.
 
-Mac test helper: uses OpenSSL's legacy DES implementation for VNC challenge
-response. Password is read over SSH and never printed or saved locally.
+Requires OpenSSL 3 with its legacy provider. Passwords are read privately from
+stdin or a prompt; no device alias, user credentials or IP is stored here.
 """
+import argparse
+import getpass
+import sys
 import socket
 import struct
 import subprocess
@@ -19,8 +22,8 @@ def receive(sock, count):
     return data
 
 
-def connect(password):
-    sock = socket.create_connection(("127.0.0.1", 15901), timeout=10)
+def connect(host, port, password):
+    sock = socket.create_connection((host, port), timeout=10)
     try:
         assert receive(sock, 12) == b"RFB 003.008\n"
         sock.sendall(b"RFB 003.008\n")
@@ -52,9 +55,14 @@ def connect(password):
 
 
 if __name__ == "__main__":
-    password = subprocess.check_output(
-        ["ssh", "redmi", "cat .config/muxtops/vnc-password.txt"]
-    ).strip()
-    assert password, "No test password configured on Redmi"
-    assert connect(password), "Valid password rejected"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=5901)
+    parser.add_argument("--password-stdin", action="store_true")
+    args = parser.parse_args()
+    password = (sys.stdin.buffer.readline().rstrip(b"\r\n") if args.password_stdin
+                else getpass.getpass("VNC password: ").encode())
+    if not password:
+        parser.error("A VNC password is required")
+    assert connect(args.host, args.port, password), "Valid password rejected"
     print("VNC authentication and ServerInit: PASS")

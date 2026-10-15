@@ -1,10 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+case ${1:-} in
+    configure|uninstall)
+        operation=$1
+        shift
+        helper="$PREFIX/libexec/muxtops/$operation.sh"
+        [[ -f $helper ]] || { echo 'Run install.sh to install the management commands.' >&2; exit 1; }
+        exec bash "$helper" "$@"
+        ;;
+esac
+
 state=${XDG_STATE_HOME:-$HOME/.local/state}/muxtops
 config=${XDG_CONFIG_HOME:-$HOME/.config}/muxtops
 display=:1
 port=5901
+listen_address=127.0.0.1
+if [[ -f $config/vnc-address ]]; then
+    read -r listen_address < "$config/vnc-address"
+fi
+[[ $listen_address =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    echo 'vnc-address must contain one IPv4 address.' >&2
+    exit 1
+}
 mkdir -p "$state" "$config"
 
 # Compare the process birth time as well as PID. A stale PID file must never
@@ -34,7 +52,7 @@ session() {
     trap cleanup EXIT
     trap 'exit 0' TERM INT HUP
     export DISPLAY=$display
-    Xvnc "$display" -nolisten tcp -localhost -rfbport "$port" \
+    Xvnc "$display" -nolisten tcp -interface "$listen_address" -rfbport "$port" \
         -rfbauth "$config/passwd" -geometry 1280x720 -depth 24 &
     xpid=$!
     for ((attempt=0; attempt<100; attempt++)); do
@@ -84,6 +102,13 @@ session() {
     wait -n "$xpid" "$wpid" "$bpid" "$ppid"
 }
 
+# Android viewers such as AVNC register vnc:// links. Start before acquiring
+# the lifecycle lock so the nested start command cannot deadlock.
+if [[ ${1:-} == view ]]; then
+    "$0" start
+    exec termux-open-url "vnc://$listen_address:$port"
+fi
+
 # Serialize lifecycle operations, including concurrent start requests.
 # The detached supervisor closes this descriptor so it cannot hold the lock.
 if [[ ${1:-help} != _session ]]; then
@@ -95,7 +120,7 @@ case ${1:-help} in
     start)
         if alive; then
             [[ -f $state/ready ]] || { echo 'Desktop is still starting.' >&2; exit 1; }
-            echo 'Desktop already running on localhost:5901.'
+            echo "Desktop already running on $listen_address:$port."
             exit 0
         fi
         [[ -s $config/passwd ]] || { echo 'Run desktop password first.' >&2; exit 1; }
@@ -117,7 +142,7 @@ case ${1:-help} in
             sleep 0.1
         done
         if alive && [[ -f $state/ready ]]; then
-            echo 'Desktop ready: localhost:5901 (SSH tunnel required).'
+            echo "Desktop ready: $listen_address:$port."
         else
             if alive; then kill "$supervisor"; fi
             wait "$supervisor" 2>/dev/null || true
@@ -141,19 +166,23 @@ case ${1:-help} in
         ;;
     status)
         if alive && [[ -f $state/ready ]]; then
-            echo 'Running: localhost:5901'
+            echo "Running: $listen_address:$port"
         else
             echo 'Stopped'
             exit 1
         fi
         ;;
     log) tail -n 80 "$state/desktop.log" ;;
+    info)
+        printf 'VNC server: %s\nPort: %s\nOn this phone: open AVNC (or another VNC viewer) and use the address above.\n' "$listen_address" "$port"
+        printf 'Start: desktop start | Stop: desktop stop\n'
+        ;;
     password)
         if alive; then echo 'Stop the desktop before changing its password.' >&2; exit 1; fi
         vncpasswd "$config/passwd"
         chmod 600 "$config/passwd"
         ;;
     _session) session ;;
-    help|--help|-h) printf '%s\n' 'Usage: desktop {start|stop|status|log|password}' ;;
+    help|--help|-h) printf '%s\n' 'Usage: desktop {start|stop|status|view|info|configure|uninstall|log|password}' ;;
     *) echo "Unknown command: $1" >&2; exit 2 ;;
 esac
