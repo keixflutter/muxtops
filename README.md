@@ -23,6 +23,24 @@ The **full** profile bundles the apps and configuration shown above. Choose
 **minimal** to skip Firefox and Code - OSS. Apps only run when you open them.
 Code - OSS is the open-source VS Code build provided by Termux, not VSCodium.
 
+## Screenshots
+
+Real captures from a Redmi Note 11 Pro running the full profile in Termux,
+viewed over VNC at 1280 × 720.
+
+**File browser:** PCManFM browsing the muxtops project folders and files.
+
+![PCManFM browsing the muxtops project](docs/screenshots/file-browser.png)
+
+**Mozilla Firefox:** loading this public GitHub repository over HTTPS.
+
+![Mozilla Firefox displaying the muxtops GitHub repository](docs/screenshots/firefox.png)
+
+**Code - OSS:** the project open with the installer source and shell syntax
+highlighting.
+
+![Code - OSS displaying install.sh with syntax highlighting](docs/screenshots/code-oss.png)
+
 ## 1. Prepare your phone
 
 - Install **[Termux](https://github.com/termux/termux-app#installation)** from
