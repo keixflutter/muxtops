@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Files
+Exec=pcmanfm
+Icon=MU XTOPS CONFIG PATH/icons/files.svg
+Terminal=false

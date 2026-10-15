@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_menu xmlns="http://openbox.org/3.4/menu">
+  <menu id="muxtops-menu" label="muxtops">
+    <item label="Terminal"><action name="Execute"><command>xterm</command></action></item>
+    <item label="Files"><action name="Execute"><command>pcmanfm</command></action></item>
+    <menu id="client-list-combined-menu" label="Windows"/>
+    <separator/>
+    <item label="Reload settings"><action name="Reconfigure"/></item>
+    <item label="Stop desktop"><action name="Exit"><prompt>no</prompt></action></item>
+  </menu>
+</openbox_menu>

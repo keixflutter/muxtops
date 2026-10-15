@@ -3,23 +3,33 @@ set -euo pipefail
 
 state=${XDG_STATE_HOME:-$HOME/.local/state}/muxtops
 config=${XDG_CONFIG_HOME:-$HOME/.config}/muxtops
-# Fixed display keeps SSH forwarding predictable. Fail instead of killing
-# another application's X server if display :1 is already occupied.
 display=:1
 port=5901
 mkdir -p "$state" "$config"
 
+# Compare the process birth time as well as PID. A stale PID file must never
+# let stop signal an unrelated process after Android has recycled its PID.
+process_birth() { awk '{print $22}' "/proc/$1/stat" 2>/dev/null; }
 alive() {
-    [[ -f $state/session.pid ]] && kill -0 "$(cat "$state/session.pid")" 2>/dev/null
+    local pid birth current
+    [[ -s $state/session.pid ]] || return 1
+    read -r pid birth < "$state/session.pid" || return 1
+    [[ $pid =~ ^[0-9]+$ && $birth =~ ^[0-9]+$ ]] || return 1
+    current=$(process_birth "$pid") || return 1
+    [[ $current == "$birth" ]] && kill -0 "$pid" 2>/dev/null
 }
 
 session() {
-    local xpid='' wpid='' bpid='' ready=0
+    local xpid='' wpid='' bpid='' ppid='' ready=0
     cleanup() {
-        [[ -z $wpid ]] || kill "$wpid" 2>/dev/null || true
-        [[ -z $bpid ]] || kill "$bpid" 2>/dev/null || true
-        [[ -z $xpid ]] || kill "$xpid" 2>/dev/null || true
-        rm -f "$state/session.pid" "$state/ready"
+        trap - EXIT
+        for pid in "$ppid" "$wpid" "$bpid" "$xpid"; do
+            [[ -z $pid ]] || kill "$pid" 2>/dev/null || true
+        done
+        for pid in "$ppid" "$wpid" "$bpid" "$xpid"; do
+            [[ -z $pid ]] || wait "$pid" 2>/dev/null || true
+        done
+        rm -f "$state/session.pid" "$state/ready" "$state/dbus-address"
     }
     trap cleanup EXIT
     trap 'exit 0' TERM INT HUP
@@ -27,17 +37,15 @@ session() {
     Xvnc "$display" -nolisten tcp -localhost -rfbport "$port" \
         -rfbauth "$config/passwd" -geometry 1280x720 -depth 24 &
     xpid=$!
-    # Wait for the X server to accept connections before starting the desktop.
-    for ((attempt=0; attempt<50; attempt++)); do
-        kill -0 "$xpid" 2>/dev/null || { echo 'Xvnc failed; see desktop log.'; exit 1; }
-        if "$PREFIX/bin/xrdb" -display "$display" -query >/dev/null 2>&1; then
+    for ((attempt=0; attempt<100; attempt++)); do
+        kill -0 "$xpid" 2>/dev/null || { echo 'Xvnc failed.'; exit 1; }
+        if xrdb -display "$display" -query >/dev/null 2>&1; then
             ready=1
             break
         fi
         sleep 0.1
     done
-    [[ $ready == 1 ]] || { echo "X server readiness timed out."; exit 1; }
-    kill -0 "$xpid" 2>/dev/null || exit 1
+    [[ $ready == 1 ]] || { echo 'X server readiness timed out.'; exit 1; }
     : > "$state/dbus-address"
     dbus-daemon --session --nofork --print-address=3 3>"$state/dbus-address" &
     bpid=$!
@@ -49,81 +57,103 @@ session() {
     [[ -s $state/dbus-address ]] || exit 1
     export DBUS_SESSION_BUS_ADDRESS
     DBUS_SESSION_BUS_ADDRESS=$(head -n 1 "$state/dbus-address")
-    bash -c '
-        feh --bg-fill "$HOME/.config/muxtops/wallpaper" 2>/dev/null || true
-        xterm -geometry 90x24+30+30 &
-        exec openbox --config-file "$1"
-    ' bash "$config/rc.xml" &
+    MUXTOPS_CONFIG=$config bash -ec '
+        if [[ -f $MUXTOPS_CONFIG/wallpaper ]]; then
+            feh --bg-fill "$MUXTOPS_CONFIG/wallpaper"
+        fi
+        exec openbox --config-file "$MUXTOPS_CONFIG/rc.xml"
+    ' &
     wpid=$!
-    sleep 0.5
-    kill -0 "$xpid" 2>/dev/null && kill -0 "$wpid" 2>/dev/null || exit 1
+    mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/tint2"
+    tint2 -c "$config/tint2rc" &
+    ppid=$!
+    ready=0
+    for ((attempt=0; attempt<100; attempt++)); do
+        for pid in "$xpid" "$wpid" "$bpid" "$ppid"; do
+            kill -0 "$pid" 2>/dev/null || exit 1
+        done
+        if xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id' &&
+           xprop -root _NET_CLIENT_LIST | grep -q 'window id'; then
+            ready=1
+            break
+        fi
+        sleep 0.1
+    done
+    [[ $ready == 1 ]] || { echo 'Desktop windows did not become ready.'; exit 1; }
     touch "$state/ready"
-    wait -n "$xpid" "$wpid" "$bpid"
+    wait -n "$xpid" "$wpid" "$bpid" "$ppid"
 }
+
+# Serialize lifecycle operations, including concurrent start requests.
+# The detached supervisor closes this descriptor so it cannot hold the lock.
+if [[ ${1:-help} != _session ]]; then
+    exec 9>"$state/control.lock"
+    flock -w 30 9 || { echo 'Another desktop operation is busy.' >&2; exit 1; }
+fi
 
 case ${1:-help} in
     start)
-        alive && { echo 'Desktop already running on localhost:5901.'; exit 0; }
+        if alive; then
+            [[ -f $state/ready ]] || { echo 'Desktop is still starting.' >&2; exit 1; }
+            echo 'Desktop already running on localhost:5901.'
+            exit 0
+        fi
         [[ -s $config/passwd ]] || { echo 'Run desktop password first.' >&2; exit 1; }
-        for dep in Xvnc dbus-daemon openbox xterm xrdb; do
+        for dep in Xvnc dbus-daemon openbox xterm xrdb xprop tint2 pcmanfm; do
             command -v "$dep" >/dev/null || { echo "Missing dependency: $dep" >&2; exit 1; }
         done
         if [[ -e ${TMPDIR:-$PREFIX/tmp}/.X11-unix/X1 || -e ${TMPDIR:-$PREFIX/tmp}/.X1-lock ]]; then
             echo 'Display :1 is occupied. Check the existing server before starting.' >&2
             exit 1
         fi
-        cat > "$config/rc.xml" <<'XML'
-<?xml version="1.0" encoding="UTF-8"?>
-<openbox_config xmlns="http://openbox.org/3.4/rc">
-  <theme><name>Clearlooks</name></theme>
-  <keyboard>
-    <keybind key="W-Return"><action name="Execute"><command>xterm</command></action></keybind>
-    <keybind key="A-F4"><action name="Close"/></keybind>
-    <keybind key="A-Tab"><action name="NextWindow"/></keybind>
-  </keyboard>
-  <mouse><context name="Titlebar">
-    <mousebind button="Left" action="Drag"><action name="Move"/></mousebind>
-    <mousebind button="Right" action="Drag"><action name="Resize"/></mousebind>
-    <mousebind button="Left" action="DoubleClick"><action name="ToggleMaximize"/></mousebind>
-  </context></mouse>
-</openbox_config>
-XML
+        [[ -f $config/rc.xml ]] || { echo 'Missing config: run install.sh.' >&2; exit 1; }
         rm -f "$state/ready"
-        nohup "$0" _session </dev/null >"$state/desktop.log" 2>&1 &
-        echo $! > "$state/session.pid"
-        for ((attempt=0; attempt<80; attempt++)); do
+        nohup "$0" _session 9>&- </dev/null >"$state/desktop.log" 2>&1 &
+        supervisor=$!
+        printf '%s %s\n' "$supervisor" "$(process_birth "$supervisor")" > "$state/session.pid"
+        for ((attempt=0; attempt<250; attempt++)); do
             alive || break
             [[ -f $state/ready ]] && break
             sleep 0.1
         done
         if alive && [[ -f $state/ready ]]; then
-            echo 'Desktop running: localhost:5901 (SSH tunnel required).'
+            echo 'Desktop ready: localhost:5901 (SSH tunnel required).'
         else
+            if alive; then kill "$supervisor"; fi
+            wait "$supervisor" 2>/dev/null || true
             cat "$state/desktop.log" >&2
             exit 1
         fi
         ;;
     stop)
         if alive; then
-            kill "$(cat "$state/session.pid")"
-            for ((attempt=0; attempt<50; attempt++)); do
+            read -r supervisor _ < "$state/session.pid"
+            kill "$supervisor"
+            for ((attempt=0; attempt<100; attempt++)); do
                 alive || break
                 sleep 0.1
             done
-            if alive; then echo "Desktop did not stop; inspect desktop log." >&2; exit 1; fi
+            if alive; then echo 'Desktop did not stop; inspect desktop log.' >&2; exit 1; fi
             echo 'Desktop stopped.'
         else
             echo 'Desktop is stopped.'
         fi
         ;;
     status)
-        if alive; then echo 'Running: localhost:5901'; else echo 'Stopped'; fi
+        if alive && [[ -f $state/ready ]]; then
+            echo 'Running: localhost:5901'
+        else
+            echo 'Stopped'
+            exit 1
+        fi
         ;;
     log) tail -n 80 "$state/desktop.log" ;;
     password)
+        if alive; then echo 'Stop the desktop before changing its password.' >&2; exit 1; fi
         vncpasswd "$config/passwd"
         chmod 600 "$config/passwd"
         ;;
     _session) session ;;
-    *) printf '%s\n' 'Usage: desktop {start|stop|status|log|password}' ;;
+    help|--help|-h) printf '%s\n' 'Usage: desktop {start|stop|status|log|password}' ;;
+    *) echo "Unknown command: $1" >&2; exit 2 ;;
 esac

@@ -1,0 +1,32 @@
+# Flat decorations; no shadow or compositor.
+window.border.width: 1
+padding.width: 8
+padding.height: 5
+window.active.border.color: #49616e
+window.inactive.border.color: #263640
+window.active.title.bg: flat solid
+window.active.title.bg.color: #243947
+window.inactive.title.bg: flat solid
+window.inactive.title.bg.color: #192831
+window.active.label.bg: parentrelative
+window.inactive.label.bg: parentrelative
+window.active.label.text.color: #e6f1f3
+window.inactive.label.text.color: #899da8
+window.active.button.unpressed.bg: parentrelative
+window.inactive.button.unpressed.bg: parentrelative
+window.active.button.unpressed.image.color: #a9c7d1
+window.inactive.button.unpressed.image.color: #6f8997
+window.active.button.pressed.bg: flat solid
+window.active.button.pressed.bg.color: #497b79
+window.active.button.pressed.image.color: #ffffff
+menu.title.bg: flat solid
+menu.title.bg.color: #243947
+menu.title.text.color: #dfecef
+menu.items.bg: flat solid
+menu.items.bg.color: #172730
+menu.items.text.color: #bccfd5
+menu.items.active.bg: flat solid
+menu.items.active.bg.color: #315854
+menu.items.active.text.color: #ffffff
+menu.border.color: #3c535f
+menu.border.width: 1

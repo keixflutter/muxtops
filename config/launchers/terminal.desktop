@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Terminal
+Exec=xterm -bg '#111c24' -fg '#dce8ed' -geometry 90x25
+Icon=MU XTOPS CONFIG PATH/icons/terminal.svg
+Terminal=false
