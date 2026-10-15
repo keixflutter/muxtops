@@ -75,6 +75,16 @@ permissions. Retrieve it privately:
 ssh redmi cat .config/muxtops/vnc-password.txt
 ```
 
+## Optional browser
+
+```sh
+bash install-browser.sh
+```
+
+Installs Firefox from the official Termux repository, adds a panel launcher
+and menu item, and reloads Tint2 in place. Firefox is never started with the
+desktop; close it when unused to keep idle memory low.
+
 ## Desktop controls
 
 - Panel: Terminal, Files, running windows, and Jakarta time.
