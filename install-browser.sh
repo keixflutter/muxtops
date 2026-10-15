@@ -8,12 +8,12 @@ config=${XDG_CONFIG_HOME:-$HOME/.config}/muxtops
 apt-get install -y --no-install-recommends libc++ firefox
 firefox --version
 mkdir -p "$config/launchers"
-cat > "$config/launchers/browser.desktop" <<'DESKTOP'
+cat > "$config/launchers/browser.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Firefox
 Exec=firefox
-Icon=firefox
+Icon=$PREFIX/share/icons/hicolor/48x48/apps/firefox.png
 Terminal=false
 DESKTOP
 if ! grep -q '/launchers/browser.desktop' "$config/tint2rc"; then
